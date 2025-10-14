@@ -1,0 +1,66 @@
+# filepath: densenet_hyperparam_tuning.py
+import tensorflow as tf
+from tensorflow.keras.applications import DenseNet121
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Input
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.optimizers import Adam, AdamW, SGD
+import keras_tuner as kt
+
+
+def build_model(hp):
+    base_model = DenseNet121(include_top=False, weights='imagenet', input_tensor=Input(shape=(224, 224, 3)))
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+
+    predictions = Dense(10, activation='softmax')(x)
+    model = Model(inputs=base_model.input, outputs=predictions)
+
+    # Optimizer choice
+    optimizer_choice = hp.Choice('optimizer', ['adam', 'adamw', 'sgd'])
+    learning_rate = hp.Float('learning_rate', 1e-8, 1e-3, sampling='LOG')
+
+    if optimizer_choice == 'adam':
+        optimizer = Adam(learning_rate=learning_rate)
+    elif optimizer_choice == 'adamw':
+        weight_decay = hp.Choice('weight_decay', values=[1e-2, 1e-3, 1e-4])
+        optimizer = AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
+    else:  # 'sgd'
+        momentum = hp.Choice('momentum', values=[0.0, 0.5, 0.9])
+        optimizer = SGD(learning_rate=learning_rate, momentum=momentum, nesterov=True)
+
+    model.compile(
+        optimizer=optimizer,
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    return model
+
+
+# Tuner definition
+tuner = kt.BayesianOptimization(
+    build_model,
+    objective='val_accuracy',
+    max_trials=15,
+    directory='my_dirD',
+    project_name='densenet_tuning_optimizers'
+)
+
+stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+
+# Run hyperparameter search
+tuner.search(train_gen, epochs=10, validation_data=(test_data, test_target), callbacks=[stop_early])
+
+# Best hyperparameters
+best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+print("Best Hyperparameters:")
+for p in best_hps.values.keys():
+    print(f"{p}: {best_hps.get(p)}")
+
+# Build & train best model
+model = tuner.hypermodel.build(best_hps)
+history = model.fit(train_gen, epochs=100, validation_data=(test_data, test_target))
