@@ -1,0 +1,41 @@
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras import layers
+
+# Light augmentation: only geometric transformations
+light_augmentor = ImageDataGenerator(
+    rotation_range=25,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        vertical_flip=True,       
+)
+
+##########################################################
+
+# Medium augmentation: geometric + color + shift + crop
+medium_augmentor = ImageDataGenerator(
+    rotation_range=25,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        vertical_flip=True,
+        brightness_range=[0.2,1.0]
+        saturation_range=[0.2, 1.0]
+        width_shift_range=0.2,
+        height_shift_range=0.2, 
+)
+
+# Random cropping layer for more control
+def random_crop(img, crop_size=(224, 224)):
+    return tf.image.random_crop(img, size=(crop_size[0], crop_size[1], 3))
+
+# Wrap generator with cropping
+def crop_generator(batches, crop_size=(224, 224)):
+    while True:
+        batch_x, batch_y = next(batches)
+        batch_cropped = tf.stack([random_crop(img, crop_size) for img in batch_x])
+        yield (batch_cropped, batch_y)
+
+train_gen_cropped = crop_generator(train_gen)
+

@@ -1,0 +1,496 @@
+
+from tensorflow.keras.layers import AveragePooling2D
+from tensorflow.keras.layers import Dropout
+from tensorflow.compat.v1 import InteractiveSession
+from tensorflow.keras.layers import Input
+from tensorflow.keras.models import Model
+import tensorflow as tf
+#from keras.utils import np_utils
+from keras.utils import to_categorical
+from tensorflow.keras.applications import DenseNet121, DenseNet201
+import cv2,os
+import numpy as np
+from sklearn.model_selection import train_test_split
+import random
+from tensorflow import keras
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from keras import callbacks
+from keras.preprocessing.image import ImageDataGenerator
+from keras.layers import Conv2D, MaxPooling2D, Flatten, BatchNormalization
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import layers
+from tensorflow.keras.applications.inception_v3 import InceptionV3
+from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
+from keras.applications.resnet_v2 import ResNet50V2
+from tensorflow.keras.applications.resnet50 import preprocess_input
+from tensorflow.keras.preprocessing.image import ImageDataGenerator,load_img
+from tensorflow.keras.callbacks import EarlyStopping
+from keras import callbacks
+from glob import glob
+import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+import vit_keras
+import tensorflow_hub as hub
+from sklearn.metrics import plot_confusion_matrix
+import seaborn as sns
+
+
+# load data
+data_path=r'Dataset 3'
+categories=os.listdir(data_path)
+labels=np.arange(len(categories))
+
+label_dict=dict(zip(categories,labels))
+
+
+img_size=224
+
+data=[]
+target=[]
+
+for category in categories:
+    folder_path=os.path.join(data_path,category)
+    print(folder_path)
+    img_names=os.listdir(folder_path)
+   # print(img_names)  
+    for img_name in img_names:
+        img_path=os.path.join(folder_path,img_name)
+        img=cv2.imread(img_path)
+        #cv2.imshow('LIVE',img)
+        #cv2.waitKey(100)
+        try:
+            #split the dataset into data(images) and target(categorical labels)
+            resized=cv2.resize(img,(img_size,img_size))
+            data.append(resized)
+            target.append(label_dict[category])
+            
+        except Exception as e:
+            print(e)
+            
+label_dict
+
+
+
+#get the data and categorical labels to numpy arrays
+data=np.array(data)
+target=np.array(target)
+
+#Dividing all the pixels in all the images by 255 in order to convert them to the range 0-1.(Scale the data) 
+#This is done to reduce the complexity in training the Neural Network.
+data_new=data/255.0
+
+#Converting the labels into categorical representation
+#target_new=np_utils.to_categorical(target)
+target_new=to_categorical(target, 6)
+
+#saving data and target as numpy array files
+np.save('data-transfer-learning1',data_new)
+np.save('target-transfer-learning1',target_new)
+
+data=np.load('data-transfer-learning1.npy')
+target=np.load('target-transfer-learning1.npy')
+
+#Split the dataset, training and testing
+train_data,test_data,train_target,test_target=train_test_split(data,target,test_size=0.2,shuffle=True)
+
+
+
+learning=tf.keras.callbacks.ReduceLROnPlateau(monitor='val_accuracy', patience=15, verbose=1)
+earlystopping = callbacks.EarlyStopping(monitor ="val_accuracy",mode ="max", patience = 15, restore_best_weights = True)
+optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-07, amsgrad=False,)
+
+
+#data augmentation 
+gen=ImageDataGenerator(
+  	rotation_range=25,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        vertical_flip=True, 
+  )
+
+
+train_gen = gen.flow(train_data,train_target)
+
+#load pretrained Swin Transformer models
+
+#swin small
+
+vit_swsmmodel = hub.KerasLayer("https://tfhub.dev/sayakpaul/swin_small_patch4_window7_224/1", trainable=False)
+
+modelss = tf.keras.Sequential([
+  vit_swsmmodel,
+  ])
+modelss.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelss.add(tf.keras.layers.Dropout(0.5))
+modelss.add(tf.keras.layers.Dense(6, activation='softmax'))
+
+modelss.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+historyss = modelss.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelss.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+
+cms = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cms, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#swin base
+vit_swbmmodel = hub.KerasLayer("https://tfhub.dev/sayakpaul/swin_base_patch4_window7_224/1", trainable=False)
+modelsb = tf.keras.Sequential([
+  vit_swbmmodel,
+  ])
+modelsb.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelsb.add(tf.keras.layers.Dropout(0.5))
+modelsb.add(tf.keras.layers.Dense(6, activation='softmax'))
+
+modelsb.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+historysb = modelsb.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelsb.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+cmb = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmb, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#swin large
+vit_swlmodel = hub.KerasLayer("https://tfhub.dev/sayakpaul/swin_large_patch4_window7_224/1", trainable=False)
+modelsl = tf.keras.Sequential([
+  vit_swlmodel,
+  ])
+modelsl.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelsl.add(tf.keras.layers.Dropout(0.5))
+modelsl.add(tf.keras.layers.Dense(6, activation='softmax'))
+modelsl.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+historysl = modelsl.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelsl.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+cml = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cml, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+#vit_r26_s32 model
+# Load the pre-trained ViT model
+vit_vit_r26_s32model = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_r26_s32_lightaug_classification/1", trainable=False)
+# Step 3: Add Custom Layers
+modelvit_r26_s32 = tf.keras.Sequential([
+  vit_vit_r26_s32model,
+  ])
+modelvit_r26_s32.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelvit_r26_s32.add(tf.keras.layers.Dropout(0.5))
+modelvit_r26_s32.add(tf.keras.layers.Dense(6, activation='softmax'))
+modelvit_r26_s32.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+historyvit_r26_s32 = modelvit_r26_s32.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelvit_r26_s32.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+cmvit_r26_s32 = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmvit_r26_s32, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#vit_r50_l32 model
+# Load the pre-trained ViT model
+vit_modelvit_r50_l32 = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_r50_l32_classification/1", trainable=False)
+
+modelvit_r50_l32 = tf.keras.Sequential([
+  vit_modelvit_r50_l32,
+  ])
+modelvit_r50_l32.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelvit_r50_l32.add(tf.keras.layers.Dropout(0.5))
+modelvit_r50_l32.add(tf.keras.layers.Dense(6, activation='softmax'))
+modelvit_r50_l32.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+historyvit_r50_l32 = modelvit_r50_l32.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelvit_r50_l32.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+cmvit_r50_l32 = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmvit_r50_l32, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+#ViT models
+
+# Load the pre-trained ViT model
+vit_modelvit_b32 = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_b32_classification/1", trainable=False)
+
+
+modelvit_b32 = tf.keras.Sequential([
+  vit_modelvit_b32,
+  ])
+modelvit_b32.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelvit_b32.add(tf.keras.layers.Dropout(0.5))
+modelvit_b32.add(tf.keras.layers.Dense(6, activation='softmax'))
+
+modelvit_b32.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+historyvit_b32 = modelvit_b32.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = modelvit_b32.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+
+cmb32 = confusion_matrix(test_labels, rounded_labels)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmb32, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+# l16 model
+
+# Load the pre-trained ViT model
+vit_modell16 = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_l16_classification/1", trainable=False)
+modell16 = tf.keras.Sequential([
+  vit_modell16,  #tf.keras.layers.Dense(8, activation='softmax')  
+])
+modell16.add(tf.keras.layers.Dense(1024, activation='relu'))
+modell16.add(tf.keras.layers.Dropout(0.5))
+modell16.add(tf.keras.layers.Dense(6, activation='softmax'))
+modell16.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+historyl16 = modell16.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labelsl16=np.argmax(test_target, axis=1)
+rounded_labelsl16[1]
+rounded_predictionsl16 = modell16.predict(test_data)
+test_labels=np.argmax(rounded_predictionsl16,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labelsl16)
+print(classification_report(test_labels, rounded_labelsl16))
+cml16 = confusion_matrix(test_labels, rounded_labelsl16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cml16, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#b16 model
+# Load the pre-trained ViT model b16
+vit_model = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_b16_classification/1", trainable=False)
+modelb16 = tf.keras.Sequential([
+  vit_model,
+ ])
+modelb16.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelb16.add(tf.keras.layers.Dropout(0.5))
+modelb16.add(tf.keras.layers.Dense(6, activation='softmax'))
+modelb16.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+historyb16 = modelb16.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labelsb16=np.argmax(test_target, axis=1)
+rounded_labelsb16[1]
+rounded_predictionsb16 = modelb16.predict(test_data)
+test_labels=np.argmax(rounded_predictionsb16,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labelsb16)
+print(classification_report(test_labels, rounded_labelsb16))
+cmb16 = confusion_matrix(test_labels, rounded_labelsb16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmb16, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#s16
+# Load the pre-trained ViT model
+s16 = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_s16_classification/1", trainable=False)
+models16 = tf.keras.Sequential([s16])
+models16.add(tf.keras.layers.Dense(1024, activation='relu'))
+models16.add(tf.keras.layers.Dropout(0.5))
+models16.add(tf.keras.layers.Dense(6, activation='softmax'))
+models16.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+historys16 = models16.fit(train_gen, epochs=100, validation_data=(test_data,test_target),callbacks=[learning,earlystopping],verbose=2)
+rounded_labelss16=np.argmax(test_target, axis=1)
+rounded_labelss16[1]
+rounded_predictionss16 = models16.predict(test_data)
+test_labels=np.argmax(rounded_predictionss16,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labelss16)
+print(classification_report(test_labels, rounded_labelss16))
+cms16 = confusion_matrix(test_labels, rounded_labelss16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cms16, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#CNN models
+
+#Xception
+model_xcep = tf.keras.applications.Xception(input_shape=(224, 224, 3), include_top=False, weights="imagenet")
+global_average_layer = tf.keras.layers.GlobalAveragePooling2D()(model_xcep.output)
+global_average_layer=layers.BatchNormalization()(global_average_layer)
+prediction_layer = tf.keras.layers.Dense(6, activation='softmax')(global_average_layer)
+model = tf.keras.models.Model(inputs=model_xcep.input, outputs=prediction_layer)
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001), loss="categorical_crossentropy", metrics=["accuracy"])
+    
+for layer in model_xcep.layers:
+      layer.trainable = False
+
+histxcep = model.fit(train_gen,validation_data=(test_data,test_target),epochs=100,callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = model.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+plt.plot(histxcep.history['accuracy'])
+plt.plot(histxcep.history['val_accuracy'])
+plt.title('Training Accuracy and Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(["Training Accuracy","Validation Accuracy"])
+cmx = confusion_matrix(test_labels, rounded_labelss16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmx, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+
+#DenseNet
+b_mod=DenseNet121(include_top=False,weights='imagenet',input_tensor=Input(shape=(224,224, 3)))
+
+for layer in b_mod.layers:
+    layer.trainable = False
+
+mid= b_mod.output
+mid = GlobalAveragePooling2D()(mid)
+mid = Dense(124, activation = 'relu')(mid)
+mid = Dropout(0.5)(mid)
+predictions = Dense(6, activation='softmax')(mid)
+model = Model(inputs=b_mod.input, outputs=predictions)
+
+
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001), loss="categorical_crossentropy", metrics=["accuracy"])
+histdense = model.fit(train_gen,validation_data=(test_data,test_target),epochs=300,callbacks=[learning,earlystopping],verbose=2)
+
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = model.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+cmd = confusion_matrix(test_labels, rounded_labelss16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmd, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+plt.plot(histdense.history['accuracy'])
+plt.plot(histdense.history['val_accuracy'])
+plt.title('Training Accuracy and Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(["Training Accuracy","Validation Accuracy"])
+
+
+#Resnet
+IMAGE_SIZE = [224, 224]
+resnet = ResNet50V2(input_shape=IMAGE_SIZE+[3], weights='imagenet', include_top=False)
+for layer in resnet.layers:
+    layer.trainable = False
+#folders = glob('/content/drive/MyDrive/New Plant Diseases Dataset(Augmented)/NIR_new/*')
+x = Flatten()(resnet.output)
+x=Dropout(0.5)(x)
+prediction = Dense(6, activation='softmax')(x)
+model = Model(inputs=resnet.input, outputs=prediction)
+#model.summary()
+
+# compile the model (after setting layers to non-trainable)
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001), loss="categorical_crossentropy", metrics=["accuracy"])
+history = model.fit(train_gen,validation_data=(test_data,test_target),epochs=300,callbacks=[learning,earlystopping],verbose=2)
+rounded_labels=np.argmax(test_target, axis=1)
+rounded_labels[1]
+rounded_predictions = model.predict(test_data)
+test_labels=np.argmax(rounded_predictions,axis=1)
+test_labels[1]
+accuracy_score(test_labels, rounded_labels)
+print(classification_report(test_labels, rounded_labels))
+plt.plot(histdense.history['accuracy'])
+plt.plot(histdense.history['val_accuracy'])
+plt.title('Training Accuracy and Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(["Training Accuracy","Validation Accuracy"])
+cmr = confusion_matrix(test_labels, rounded_labelss16)
+plt.figure(figsize=(4, 4))
+sns.heatmap(cmr, annot=True, fmt="d", cmap="Blues", cbar=False)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+plt.show()
+
+
+

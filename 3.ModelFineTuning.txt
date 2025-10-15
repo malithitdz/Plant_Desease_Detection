@@ -1,0 +1,261 @@
+from tensorflow.keras.layers import AveragePooling2D
+from tensorflow.keras.layers import Dropout
+from tensorflow.compat.v1 import InteractiveSession
+from tensorflow.keras.layers import Input
+from tensorflow.keras.models import Model
+import tensorflow as tf
+#from keras.utils import np_utils
+from keras.utils import to_categorical
+from tensorflow.keras.applications import DenseNet121, DenseNet201
+import cv2,os
+import numpy as np
+from sklearn.model_selection import train_test_split
+import random
+from tensorflow import keras
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from keras import callbacks
+from keras.preprocessing.image import ImageDataGenerator
+from keras.layers import Conv2D, MaxPooling2D, Flatten, BatchNormalization
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import layers
+from tensorflow.keras.applications.inception_v3 import InceptionV3
+from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
+from keras.applications.resnet_v2 import ResNet50V2
+from tensorflow.keras.applications.resnet50 import preprocess_input
+from tensorflow.keras.preprocessing.image import ImageDataGenerator,load_img
+from tensorflow.keras.callbacks import EarlyStopping
+from keras import callbacks
+from glob import glob
+import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+import vit_keras
+import tensorflow_hub as hub
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+
+DATA_DIR = "./data"
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+NUM_CLASSES = 10
+
+EPOCHS_STAGE1 = 3
+EPOCHS_STAGE2 = 5
+EPOCHS_STAGE3 = 5
+
+# ---- Data ----
+train_datagen = ImageDataGenerator(
+    rescale=1.0/255,
+    horizontal_flip=True,
+    rotation_range=20,
+    validation_split=0.2
+)
+train_gen = train_datagen.flow_from_directory(
+    DATA_DIR,
+    target_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    subset="training",
+    class_mode="categorical"
+)
+val_gen = train_datagen.flow_from_directory(
+    DATA_DIR,
+    target_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    subset="validation",
+    class_mode="categorical"
+)
+
+
+
+# Fine-tuning CNN models
+#DenseNet
+b_mod=DenseNet121(include_top=False,weights='imagenet',input_tensor=Input(shape=(224,224, 3)))
+
+for layer in b_mod.layers:
+    layer.trainable = False
+
+mid= b_mod.output
+mid = GlobalAveragePooling2D()(mid)
+mid = Dense(124, activation = 'relu')(mid)
+mid = Dropout(0.5)(mid)
+predictions = Dense(6, activation='softmax')(mid)
+model = Model(inputs=b_mod.input, outputs=predictions)
+
+checkpoint = ModelCheckpoint("best_model.h5", save_best_only=True, monitor="val_accuracy", mode="max")
+lr_scheduler = ReduceLROnPlateau(factor=0.5, patience=2, verbose=1)
+
+def unfreeze_last_n_layers(model, n_layers):
+    base_model = model.layers[0]  # first layer is DenseNet base
+    for layer in base_model.layers[-n_layers:]:
+        layer.trainable = True
+    print(f"Unfroze last {n_layers} layers from base model.")
+
+model.compile(optimizer=optimizers.Adam(learning_rate=0.00001),
+              loss="categorical_crossentropy",
+              metrics=["accuracy"])
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE1,
+          callbacks=[checkpoint, lr_scheduler])
+
+# --- STAGE 2: Unfreeze last n layers ---
+unfreeze_last_n_layers(model, N=n)
+model.compile(optimizer=optimizers.Adam(learning_rate=0.00001),
+              loss="categorical_crossentropy",
+              metrics=["accuracy"])
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE2,
+          callbacks=[checkpoint, lr_scheduler])
+
+#.......unfreeze more layers
+
+model.save("fine_tuned_densenet121_tf_final.h5")
+print("Fine-tuning complete and model saved.")
+
+
+# Fine-tuning ViT models
+vit_model = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_b16_classification/1", trainable=False)
+modelb16 = tf.keras.Sequential([
+  vit_model,
+ ])
+modelb16.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelb16.add(tf.keras.layers.Dropout(0.5))
+modelb16.add(tf.keras.layers.Dense(6, activation='softmax'))
+
+vit_backbone.trainable = False
+
+checkpoint = callbacks.ModelCheckpoint("best_vitb16.h5", save_best_only=True, monitor="val_accuracy", mode="max")
+reduce_lr = callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=2, verbose=1)
+
+# Hunfreeze last N layers of the backbone
+def unfreeze_last_n_layers(backbone, n):
+    # backbone.layers is list of layers in the ViT backbone
+    total = len(backbone.layers)
+    # Unfreeze the last n
+    for layer in backbone.layers[-n:]:
+        layer.trainable = True
+    print(f"Unfroze last {n} layers of the backbone (out of {total})")
+
+# ---- Stage 1: Train head only ----
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=0.00001),
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE1, callbacks=[checkpoint, reduce_lr])
+
+# ---- Stage 2: Unfreeze last, N1 layers ----
+
+unfreeze_last_n_layers(vit_backbone, N1)
+
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=0.00001),
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE2, callbacks=[checkpoint, reduce_lr])
+
+#...... unfreeze more layers
+# ---- Save final model ----
+model.save("fine_tuned_vitb16_final.h5")
+print("Fine-tuning complete.")
+
+
+# Fine-tuning Swin Transformer models
+
+vit_swlmodel = hub.KerasLayer("https://tfhub.dev/sayakpaul/swin_large_patch4_window7_224/1", trainable=False)
+modelsl = tf.keras.Sequential([
+  vit_swlmodel,
+  ])
+modelsl.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelsl.add(tf.keras.layers.Dropout(0.5))
+modelsl.add(tf.keras.layers.Dense(6, activation='softmax')))
+
+
+modelsl.trainable = False
+
+checkpoint = callbacks.ModelCheckpoint("best_swin_base.h5", save_best_only=True, monitor="val_accuracy", mode="max")
+reduce_lr = callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=2, verbose=1)
+early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
+
+# Helper to unfreeze last N layers of the backbone
+def unfreeze_last_n_layers(backbone, n_layers):
+    
+    try:
+        transformer_layers = backbone.swin.encoder.layers  
+    except AttributeError:
+        transformer_layers = backbone.layers 
+
+    total = len(transformer_layers)
+    print(f"Total transformer blocks: {total}")
+    for block in transformer_layers[-n_layers:]:
+        block.trainable = True
+    print(f"Unfroze last {n_layers} transformer blocks")
+
+# --- STAGE 1: Train head only ---
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=0.00001),
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+model.fit(train_ds, validation_data=val_ds, epochs=EPOCHS_STAGE1, callbacks=[checkpoint, reduce_lr, early_stop])
+
+# --- STAGE 2: Unfreeze last N1 blocks ---
+
+unfreeze_last_n_layers(swin_backbone, N1)
+
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=0.00001),
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+model.fit(train_ds, validation_data=val_ds, epochs=EPOCHS_STAGE2, callbacks=[checkpoint, reduce_lr, early_stop])
+
+#...... unfreeze more layers
+
+# --- Save final model ---
+model.save("fine_tuned_swin_base_final.h5")
+print("Fine-tuning Swin-large complete.")
+
+
+# Fine-tuning hybrid models
+
+vit_vit_r26_s32model = hub.KerasLayer("https://tfhub.dev/sayakpaul/vit_r26_s32_lightaug_classification/1", trainable=False)
+modelvit_r26_s32 = tf.keras.Sequential([
+  vit_vit_r26_s32model,
+  ])
+modelvit_r26_s32.add(tf.keras.layers.Dense(1024, activation='relu'))
+modelvit_r26_s32.add(tf.keras.layers.Dropout(0.5))
+modelvit_r26_s32.add(tf.keras.layers.Dense(6, activation='softmax'))
+
+checkpoint = callbacks.ModelCheckpoint("best_vit_r26_s32.h5", save_best_only=True, monitor="val_accuracy", mode="max")
+reduce_lr = callbacks.ReduceLROnPlateau(factor=0.5, patience=2, verbose=1)
+early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
+
+# --- Unfreeze last N layers ---
+def unfreeze_last_n_layers(model, n_layers):
+    total = len(model.layers)
+    for layer in model.layers[-n_layers:]:
+        layer.trainable = True
+    print(f"Unfroze last {n_layers} layers (of {total})")
+
+# --- STAGE 1: Train top classifier only ---
+model.compile(optimizer=optimizers.Adam(learning_rate=0.00001),
+              loss="categorical_crossentropy",
+              metrics=["accuracy"])
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE1,
+          callbacks=[checkpoint, reduce_lr, early_stop])
+
+# --- STAGE 2: Unfreeze last n layers ---
+unfreeze_last_n_layers(base_model, n)
+model.compile(optimizer=optimizers.Adam(learning_rate=0.00001),
+              loss="categorical_crossentropy",
+              metrics=["accuracy"])
+model.fit(train_gen, validation_data=val_gen, epochs=EPOCHS_STAGE2,
+          callbacks=[checkpoint, reduce_lr, early_stop])
+
+#....... unfreeze more layers
+
+
+model.save("fine_tuned_vit_r26_s32_final.h5")
+print("Fine-tuning ViT-R26-S32 complete and model saved.")

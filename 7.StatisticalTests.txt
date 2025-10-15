@@ -1,0 +1,119 @@
+# Model_wise_anova test and Tukey test
+
+import pandas as pd
+from scipy.stats import f_oneway
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from itertools import combinations
+from skbio import DistanceMatrix
+from scipy.spatial.distance import pdist, squareform
+from skbio import DistanceMatrix
+from skbio.stats.distance import permanova
+from scipy.spatial.distance import pdist, squareform
+
+
+data = {
+    'Model': [
+        'DenseNet121', 'Xception', 'InceptionV3', 'ResNet50V2',
+        'ViT-S16', 'ViT-B16', 'ViT-L16',
+        'ViT_R26_S32', 'ViT_R50_L32',
+        'Swin_small', 'Swin_base', 'Swin_large'
+    ],
+    'K590': [91.23, 88.23, 72.53, 77.33, 77.64, 89.12, 85.32, 84.45, 86.52, 76.52, 78.12, 84.59],
+    'K665': [90.12, 79.23, 73.00, 74.55, 73.65, 84.74, 82.23, 72.68, 78.43, 78.36, 73.22, 80.34],
+    'K720': [86.03, 78.68, 75.57, 74.44, 74.44, 83.69, 76.74, 75.01, 74.67, 72.76, 75.34, 80.55],
+    'K850': [82.11, 81.34, 62.33, 72.24, 72.88, 81.23, 75.34, 65.76, 73.34, 61.54, 65.56, 76.43],
+    'BlueIR': [90.21, 88.12, 76.56, 72.00, 72.43, 84.46, 75.89, 72.23, 75.34, 70.00, 76.84, 77.24],
+    'HotMirror': [84.88, 70.87, 60.56, 69.41, 74.00, 80.75, 79.37, 75.98, 75.45, 65.23, 60.12, 73.65]
+}
+df = pd.DataFrame(data)
+filters = ['K590', 'K665', 'K720', 'K850', 'BlueIR', 'HotMirror']
+
+
+for model in df['Model']:
+    print(f"\n=== Model-wise Analysis: {model} ===")
+    accuracies = df.loc[df['Model'] == model, filters].values.flatten()
+
+    # ANOVA
+    f_stat, p_val = f_oneway(*[ [val] for val in accuracies ])  # trivial with single values per filter
+    print(f"ANOVA (Accuracy across filters): F = {f_stat:.4f}, p = {p_val:.4f}")
+
+    df_model = pd.DataFrame({
+        'Filter': filters,
+        'Accuracy': accuracies
+    })
+
+    # Tukey HSD
+    print(f"\nTukey HSD Post-hoc Test for {model}:")
+    tukey = pairwise_tukeyhsd(endog=df_model['Accuracy'], groups=df_model['Filter'], alpha=0.05)
+    print(tukey)
+    
+
+# Filter_wise_anova test and Tukey test
+
+for f in filters:
+    print(f"\n=== Filter-wise Analysis: {f} ===")
+    accuracies = df[f]
+
+    # One-way ANOVA across models
+    f_stat, p_val = f_oneway(accuracies)
+    print(f"ANOVA for {f}: F = {f_stat:.4f}, p = {p_val:.4f}")
+
+    # Tukey HSD post-hoc test
+    print(f"\nTukey HSD Post-hoc Test for {f}:")
+    tukey = pairwise_tukeyhsd(endog=accuracies, groups=df['Model'], alpha=0.05)
+    print(tukey)
+
+
+
+# Premanova
+
+data = {
+    'Model': [
+        'DenseNet121', 'Xception', 'InceptionV3', 'ResNet50V2',
+        'ViT-S16', 'ViT-B16', 'ViT-L16',
+        'ViT_R26_S32', 'ViT_R50_L32',
+        'Swin_small', 'Swin_base', 'Swin_large'
+    ],
+    # Each filter has 3 stages (H, E, D)
+    'K590_H': [95.42, 88.89, 38.20, 57.07, 53.03, 85.37, 67.52, 77.52, 65.36, 70.91, 48.20, 64.74],
+    'K590_E': [96.97, 89.67, 55.02, 68.61, 65.33, 92.22, 83.09, 81.18, 88.61, 61.97, 55.39, 81.97],
+    'K590_D': [99.88, 93.32, 85.44, 89.78, 91.53, 93.21, 92.66, 88.72, 92.03, 86.50, 85.44, 92.43],
+    #............
+}
+
+df = pd.DataFrame(data)
+
+df_long = df.melt(id_vars='Model', var_name='Filter_Stage', value_name='F1')
+df_long[['Filter', 'Stage']] = df_long['Filter_Stage'].str.split('_', expand=True)
+df_long.drop(columns=['Filter_Stage'], inplace=True)
+
+df_pivot = df_long.pivot_table(index=['Model', 'Filter'], columns='Stage', values='F1').reset_index()
+dist_matrix = pdist(df_pivot[['H', 'E', 'D']], metric='euclidean')
+dist_square = DistanceMatrix(squareform(dist_matrix), ids=[f"{m}_{f}" for m, f in zip(df_pivot['Model'], df_pivot['Filter'])])
+
+metadata_filter = df_pivot[['Filter']]
+result_filter = permanova(dist_square, metadata_filter, column='Filter', permutations=999)
+print("\n=== PERMANOVA: Grouped by Filter ===")
+print(result_filter)
+
+metadata_model = df_pivot[['Model']]
+result_model = permanova(dist_square, metadata_model, column='Model', permutations=999)
+print("\n=== PERMANOVA: Grouped by Model ===")
+print(result_model)
+
+#Pairwise PERMANOVA
+
+groups = df_pivot['Filter'].unique()
+pairwise_results = []
+
+for g1, g2 in combinations(groups, 2):
+    subset = df_pivot[df_pivot['Filter'].isin([g1, g2])]
+    dist = pdist(subset[['H', 'E', 'D']], metric='euclidean')
+    dist_sq = DistanceMatrix(squareform(dist), ids=subset['Model'])
+    meta = subset[['Filter']]
+    res = permanova(dist_sq, meta, column='Filter', permutations=999)
+    res['Group1'], res['Group2'] = g1, g2
+    pairwise_results.append(res)
+
+pairwise_df = pd.DataFrame(pairwise_results)
+print(pairwise_df[['Group1', 'Group2', 'test_statistic', 'p-value']])
